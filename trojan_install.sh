@@ -76,7 +76,7 @@ cert=$1
 key=$2
 domain=$3
 openssl x509 -in "$cert" -noout -checkend 0 >/dev/null
-openssl x509 -in "$cert" -noout -checkhost "$domain" >/dev/null
+openssl verify -untrusted "$cert" -verify_hostname "$domain" "$cert" >/dev/null
 cert_public=$(openssl x509 -in "$cert" -pubkey -noout | openssl pkey -pubin -pubout)
 key_public=$(openssl pkey -in "$key" -pubout)
 [[ $cert_public == "$key_public" ]] || { echo 'Certificate/key mismatch' >&2; exit 1; }
@@ -214,7 +214,7 @@ EOF
 }
 
 install_trojan() {
-    local domain=$1 download_dir release_json version password
+    local domain=$1 download_dir release_json version
     validate_domain "$domain" || { fail '请输入有效域名。'; return 1; }
     [[ ! -e $TROJAN_CONFIG && ! -e /usr/src/trojan/trojan ]] || {
         fail '检测到现有 Trojan；请使用 repair-cert，避免重置密码或覆盖配置。'; return 1;
@@ -240,12 +240,12 @@ install_trojan() {
     /usr/src/trojan/trojan --version || { fail 'Trojan 二进制无法运行，请检查系统库依赖。'; return 1; }
     rm -f -- "$download_dir/release.json" "$download_dir/trojan.tar.xz"
     rmdir -- "$download_dir"
-    password=$(openssl rand -hex 24) || return 1
     umask 077
     mkdir -p -- "$(dirname "$TROJAN_CONFIG")" || return 1
-    python3 - "$TROJAN_CONFIG" "$TROJAN_CERT_DIR" "$password" <<'CONFIG'
-import json, pathlib, sys
-config, cert_dir, password = sys.argv[1:]
+    python3 - "$TROJAN_CONFIG" "$TROJAN_CERT_DIR" <<'CONFIG' || return 1
+import json, pathlib, secrets, sys
+config, cert_dir = sys.argv[1:]
+password = secrets.token_hex(24)
 pathlib.Path(config).write_text(json.dumps({
     "run_type": "server", "local_addr": "0.0.0.0", "local_port": 443,
     "remote_addr": "127.0.0.1", "remote_port": 80, "password": [password],
@@ -253,6 +253,7 @@ pathlib.Path(config).write_text(json.dumps({
     "tcp": {"no_delay": True, "keep_alive": True}
 }, indent=2) + "\n")
 CONFIG
+    [[ -s $TROJAN_CONFIG ]] || { fail 'Trojan 配置写入失败。'; return 1; }
     cat > /etc/systemd/system/trojan.service <<EOF
 [Unit]
 Description=Trojan proxy
@@ -297,7 +298,8 @@ main() {
             ;;
         check-cert)
             validate_domain "$domain" || return 1
-            openssl x509 -in "$TROJAN_CERT_DIR/fullchain.cer" -noout -dates -checkend 0 -checkhost "$domain"
+            openssl x509 -in "$TROJAN_CERT_DIR/fullchain.cer" -noout -dates -checkend 0 &&
+                openssl verify -untrusted "$TROJAN_CERT_DIR/fullchain.cer" -verify_hostname "$domain" "$TROJAN_CERT_DIR/fullchain.cer"
             ;;
         *) fail '用法：bash trojan_install.sh [install|repair-cert|check-cert] 域名'; return 1 ;;
     esac

@@ -7,13 +7,13 @@ Fork 来源：[xyz690/Trojan](https://github.com/xyz690/Trojan)，保留其 Git 
 
 - 改用运行中 Nginx 的 webroot 进行 HTTP-01 签发和续签，不再为证书停止 Nginx 或占用其 80 端口。
 - 旧 standalone 续签配置迁移时仅强制重新签发一次；已使用相同 webroot 时不强制重签。
-- 保存 acme.sh 的 reloadcmd，更新后检查证书有效期、域名和私钥匹配，再重新启动 Trojan。
+- 保存 acme.sh 的 reloadcmd，更新后检查证书有效期、受信任证书链、域名和私钥匹配，再重新启动 Trojan。
 - 新安装尚无 Trojan 服务时，证书部署不会因重启不存在的服务而失败。
 - 处理 acme.sh 的“不需要续签”退出码；签发失败不把旧文件存在当作成功，安装失败回退原证书。
 - 保留旧 RSA 证书配置，新安装使用 ECC；确保续签 cron 存在且不覆盖其他任务。
 - 不关闭 UFW、firewalld 或 SELinux，不重写整个 nginx.conf，不清空网站目录。
 - 修复证书保留现有 server.conf 和密码；新安装拒绝覆盖现有 Trojan。
-- HTTPS 下载保持证书校验；新密码使用 OpenSSL 随机值，不发布带密码的 HTTP 客户端下载包。
+- HTTPS 下载保持证书校验；新密码使用系统安全随机源，不经命令行传递，也不发布带密码的 HTTP 客户端下载包。
 
 维护入口面向 **Debian/Ubuntu、systemd、x86_64 新安装**；证书修复使用系统 OpenSSL。
 CentOS 安装、BBR 脚本、卸载和旧客户端打包入口已从维护入口移除，不会自动删除历史文件。

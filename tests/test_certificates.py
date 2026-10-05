@@ -20,7 +20,7 @@ class CertificateWorkflowTests(unittest.TestCase):
     def setUpClass(cls):
         cls.fixtures = tempfile.TemporaryDirectory(prefix="trojan-cert-fixtures-")
         cls.fixture_path = Path(cls.fixtures.name)
-        for name, domain in (("valid", "trojan.example.com"), ("wrong-host", "other.example.com")):
+        for name, domain in (("valid", "trojan.example.com"), ("wrong-host", "other.example.com"), ("untrusted", "trojan.example.com")):
             cert = shell_path(cls.fixture_path / (name + ".cer"))
             key = shell_path(cls.fixture_path / (name + ".key"))
             command = f'openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 30 -subj /CN={domain} -addext subjectAltName=DNS:{domain} -keyout "{key}" -out "{cert}"'
@@ -32,6 +32,9 @@ class CertificateWorkflowTests(unittest.TestCase):
         result = subprocess.run([BASH, "-c", command], capture_output=True, text=True, encoding="utf-8")
         if result.returncode:
             raise RuntimeError(result.stderr)
+        (cls.fixture_path / "trusted-ca.pem").write_bytes(
+            (cls.fixture_path / "valid.cer").read_bytes() + (cls.fixture_path / "wrong-host.cer").read_bytes())
+        (cls.fixture_path / "empty-ca-dir").mkdir()
 
     @classmethod
     def tearDownClass(cls):
@@ -61,7 +64,9 @@ class CertificateWorkflowTests(unittest.TestCase):
                         TROJAN_CONFIG=shell_path(self.config), TROJAN_CERT_DIR=shell_path(self.cert_dir),
                         TROJAN_WEBROOT=shell_path(self.path / "webroot"),
                         TROJAN_ACME_HOME=shell_path(self.acme_home),
-                        TROJAN_ACME_BIN=shell_path(self.acme_home / "acme.sh"))
+                        TROJAN_ACME_BIN=shell_path(self.acme_home / "acme.sh"),
+                        SSL_CERT_FILE=str(self.fixture_path / "trusted-ca.pem"),
+                        SSL_CERT_DIR=str(self.fixture_path / "empty-ca-dir"))
         self.stub("systemctl", '''
 printf 'systemctl %s\n' "$*" >> "$TEST_LOG"
 case "$1:$*" in
@@ -182,6 +187,13 @@ bash -c "$reload"
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("systemctl restart", self.events())
         self.assertEqual(before, (self.cert_dir / "fullchain.cer").read_bytes())
+
+    def test_untrusted_certificate_chain_is_rejected(self):
+        result = self.run_shell('issue_and_install_certificate trojan.example.com', TEST_TROJAN_ACTIVE="0",
+                                TEST_CERT=shell_path(self.fixture_path / "untrusted.cer"),
+                                TEST_KEY=shell_path(self.fixture_path / "untrusted.key"))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("systemctl restart", self.events())
 
     def test_invalid_nginx_config_never_attempts_issuance(self):
         result = self.run_shell('issue_and_install_certificate trojan.example.com', TEST_NGINX_STATUS="1")
