@@ -1,0 +1,15 @@
+name: Script checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  certificates:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bash syntax
+        run: bash -n trojan_install.sh
+      - name: ShellCheck
+        run: shellcheck trojan_install.sh
+      - name: Certificate failure and renewal tests
+        run: python3 -m unittest discover -s tests -v
